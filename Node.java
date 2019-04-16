@@ -14,6 +14,8 @@ import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
+import javax.swing.event.TableModelEvent;
+import javax.swing.event.TableModelListener;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
@@ -192,18 +194,6 @@ public class Node implements Runnable {
 		return result;
 	}
 
-	// Broadcast main distance vector node to all neighbor host
-	void broadcast_dt() 
-		throws UnknownHostException, IOException, InterruptedException 
-	{
-		TimeUnit.SECONDS.sleep(2);
-		for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
-		{
-			send_dt_node(BASE_PORT + entry.getKey() );
-			log_area.append("Sent updated DT to node " + entry.getKey() + ".\n");
-		}
-	}
-
 	// Send primary distance vector table through socket
 	void send_dt_node(int outgoing_port ) 
 		throws UnknownHostException, IOException 
@@ -296,7 +286,8 @@ public class Node implements Runnable {
 		log_area = new JTextArea("Logs for node " + node_id + "\n");
 
 		// JTable variables
-		JTable nbr_table = new JTable(get_nbr_vector(), get_header_vector().get(1));
+		Vector<Vector<String>> nbr_data_table = get_nbr_vector();
+		JTable nbr_table = new JTable( nbr_data_table, get_header_vector().get(1) );
 
 		// Alignment for all JTables
 		DefaultTableCellRenderer c_render = new DefaultTableCellRenderer();
@@ -344,7 +335,83 @@ public class Node implements Runnable {
 		frame.add(panel);
 		frame.setSize(500, 400);
 		frame.setVisible(true);
+
+		nbr_table.getModel().addTableModelListener( (TableModelListener) new TableModelListener() 
+		{
+			public void tableChanged( TableModelEvent e )
+			{
+				if ( ! nbr_data_table.get( 0 ).equals( get_nbr_vector().get( 0 ) ) )
+				{
+					int j = 1;
+					for ( Map.Entry<Integer, Integer> entry : nbr_val.entrySet() )
+					{
+						nbr_val.put( entry.getKey(), Integer.parseInt( nbr_data_table.get( 0 ).get( j ) ) );
+						j++;
+					}
+
+					log_area.append( "Neighbor link changed. Updating DV.\n" );
+					// Update the main DV row and report if any changes were made
+					if (main_dv_change()) 
+					{
+						refresh_table();
+						// Log for changes
+						log_area.append("Updated Primary DT using Bellman-Ford.\n");
+	
+						// Broadcast changes after updating main DV table
+						for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
+						{
+							try 
+							{
+								send_dt_node(BASE_PORT + entry.getKey() );
+								log_area.append("Sent updated DT to node " + entry.getKey() + ".\n");
+							} 
+							catch (UnknownHostException e1) 
+							{
+								// TODO Auto-generated catch block
+								e1.printStackTrace();
+							} 
+							catch (IOException e1) 
+							{
+								// TODO Auto-generated catch block
+								e1.printStackTrace();
+							}
+							// Sleep between each node sent
+							//TimeUnit.MILLISECONDS.sleep(500);
+						}
+						try 
+						{
+							send_dt_node( BASE_PORT );
+						} 
+						catch (UnknownHostException e1) 
+						{
+							// TODO Auto-generated catch block
+							e1.printStackTrace();
+						} 
+						catch (IOException e1) 
+						{
+							// TODO Auto-generated catch block
+							e1.printStackTrace();
+						}
+						log_area.append("Sent DT to master\n");
+					} 				
+				}
+			}
+		});
 	}
+
+	// Broadcast main distance vector node to all neighbor host
+	void broadcast_dt() 
+		throws UnknownHostException, IOException, InterruptedException 
+	{
+		TimeUnit.SECONDS.sleep(1);
+		for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
+		{
+			send_dt_node(BASE_PORT + entry.getKey() );
+			log_area.append("Sent updated DT to node " + entry.getKey() + ".\n");
+			//TimeUnit.MILLISECONDS.sleep(500);
+		}
+	}
+
 
 	// Update neighbor Distance Vector Table
 	void update_nbr_dt() 
