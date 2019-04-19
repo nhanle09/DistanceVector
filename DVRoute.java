@@ -19,8 +19,11 @@ import java.net.UnknownHostException;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.EventQueue;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
@@ -52,6 +55,7 @@ public class DVRoute
 	private static JFrame frame;
 	private static JTable dv_table;
 	private static JTextArea log_area;
+	private static JButton step_button;
 	
 	public static HashMap<Integer, DTNode> data_import( File file_input ) 
 	throws FileNotFoundException 
@@ -181,8 +185,12 @@ public class DVRoute
 		frame = new JFrame( "Master" );
 		dv_table = new JTable( dv_data_vector, dv_header );
 		log_area = new JTextArea( "Log for master node\n" );
+		step_button = new JButton( "Step" );
 		JScrollPane dv_scroll = new JScrollPane( dv_table );
 		JScrollPane log_scroll = new JScrollPane( log_area );
+		JScrollPane step_scroll = new JScrollPane( step_button );
+
+
 
 		// Alignment for all JTables
 		DefaultTableCellRenderer c_render = new DefaultTableCellRenderer();
@@ -205,11 +213,13 @@ public class DVRoute
 		// Set size for each component
 		dv_scroll.setMaximumSize( new Dimension( 450, 110 ) );
 		log_scroll.setMaximumSize( new Dimension( 450, 200 ) );
+		step_scroll.setMaximumSize( new Dimension( 450, 35 ) );
 
 		// Store components into Container
 		Container container = new Container();
 		container.add( dv_scroll );
 		container.add( log_scroll );
+		container.add( step_scroll );
 		container.setLayout( new BoxLayout( container, BoxLayout.Y_AXIS ) );
 
 		// Store container into Panel
@@ -219,7 +229,15 @@ public class DVRoute
 		// Set frame properties and display
 		frame.setDefaultCloseOperation( JFrame.EXIT_ON_CLOSE );
 		frame.add( panel );
-		frame.setSize( 475, 360 );
+		frame.setSize( 475, 375 );
+
+		step_button.addActionListener( new ActionListener()
+		{
+			public void actionPerformed( ActionEvent e )
+			{
+				GlobalVar.trigger = true;
+			}
+		});
 	}
 
 	// Initialize program
@@ -256,6 +274,9 @@ public class DVRoute
 		Socket socket;
 		ServerSocket master_socket = new ServerSocket( BASE_PORT );
 		log_area.append( "Started listening on port " + BASE_PORT + "\n" );
+
+		//final long startTime = System.currentTimeMillis();
+
 
 		while ( true )
 		{

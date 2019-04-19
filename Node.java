@@ -1,5 +1,7 @@
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -8,6 +10,7 @@ import java.net.Socket;
 import java.net.UnknownHostException;
 import java.net.ServerSocket;
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -336,6 +339,7 @@ public class Node implements Runnable {
 		frame.setSize(500, 400);
 		frame.setVisible(true);
 
+
 		nbr_table.getModel().addTableModelListener( (TableModelListener) new TableModelListener() 
 		{
 			public void tableChanged( TableModelEvent e )
@@ -376,7 +380,6 @@ public class Node implements Runnable {
 								e1.printStackTrace();
 							}
 							// Sleep between each node sent
-							//TimeUnit.MILLISECONDS.sleep(500);
 						}
 						try 
 						{
