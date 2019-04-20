@@ -341,7 +341,7 @@ public class DVNode implements Runnable
 		// Setting custom sizes for each JScrollPane
 		nbr_scroll.setMaximumSize( new Dimension( 450, 50 ) );
 		dt_scroll.setMaximumSize( new Dimension( 450, 125 ) );
-		log_scroll.setMaximumSize( new Dimension( 450, 150 ) );
+		log_scroll.setMaximumSize( new Dimension( 450, 175 ) );
 
 		// Setup container
 		main_container.add( nbr_scroll );

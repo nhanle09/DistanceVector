@@ -32,6 +32,8 @@ public class DVMaster
 	static final int BASE_PORT = 5680;
 
 	// Variables
+	private static int stable_count = 10;
+	private static boolean stable_state = false;
 	private static File input_file = null;
 	private static boolean valid_file = false;
 	// Primary HashMap list of imported nodes
@@ -41,7 +43,6 @@ public class DVMaster
 	// A 2D vector version of dv_data_map as an input for JTable
 	private static Vector<Vector<String>> dv_data_vector;
 	private static DVReceiver dvr_receiver;
-	
 	
 	// GUI variables
 	private static JTable dv_table;
@@ -116,6 +117,8 @@ public class DVMaster
 	// Run the program in one single step
 	private static void single_step_mode() throws InterruptedException
 	{
+		long start_time = System.currentTimeMillis();
+
 		// Infinite Loop
 		while( true )
 		{
@@ -123,6 +126,32 @@ public class DVMaster
 			if( dvr_receiver.get_queue().size() != 0 )
 			{
 				update_main_dt();
+				stable_count = 6;
+			}
+			else
+			{
+				if ( stable_count < 0 )
+				{
+					stable_count = 0;
+				}
+				else if ( stable_count == 0 )
+				{
+					if( stable_state == false )
+					{
+						log_area.append( "Stable state reached!\n" );
+						long dif = ( System.currentTimeMillis() - start_time ) / 1000;
+						log_area.append( "Total Time: " + dif + " seconds\n" );
+						stable_state = true;
+					}
+				}
+				else
+				{
+					stable_count--;
+					if( stable_state == true )
+					{
+						stable_state = false;
+					}
+				}
 			}
 			// Sleep the program to not spike the CPU
 			TimeUnit.MILLISECONDS.sleep( 500 );
@@ -197,13 +226,6 @@ public class DVMaster
 		// Setting Center Alignment variable
 		c_render.setHorizontalAlignment( SwingConstants.CENTER );
 
-		// // Center Align neighbor data
-		// dv_table.setDefaultRenderer( String.class, c_render );
-		// for ( int i = 1; i < dv_table.getColumnCount(); i++ ) 
-		// {
-		// 	dv_table.getColumnModel().getColumn( i ).setCellRenderer( c_render );
-		// }
-
 		// Center Align Main DT data
 		dv_table.setDefaultRenderer( String.class, c_render );
 		for ( int i = 1; i < dv_table.getColumnCount(); i++ ) 
@@ -212,10 +234,10 @@ public class DVMaster
 		}
 
 		// Set size for each component
-		dv_scroll.setMaximumSize( new Dimension( 450, 110 ) );
-		log_scroll.setMaximumSize( new Dimension( 450, 200 ) );
 		step_scroll.setMaximumSize( new Dimension( 450, 35 ) );
-
+		dv_scroll.setMaximumSize( new Dimension( 450, 125 ) );
+		log_scroll.setMaximumSize( new Dimension( 450, 175 ) );
+		
 		// Store components into Container and JPanel,  and align vertically
 		container.add( step_scroll );
 		container.add( dv_scroll );
@@ -247,7 +269,7 @@ public class DVMaster
 		// Set frame properties and display GUI elements
 		frame.setDefaultCloseOperation( JFrame.EXIT_ON_CLOSE );
 		frame.add( panel );
-		frame.setSize( 475, 475 );
+		frame.setSize( 475, 400 );
 		frame.setVisible( true );
 	}
 
@@ -297,12 +319,14 @@ public class DVMaster
 			table_model.fireTableDataChanged();
 			dv_table.setModel( table_model );	
 			// Update logs
-			log_area.append( "Received data is more up-to-date. Updated local\n" );
+			log_area.append( "Received Node " + received_id + 
+				" is more up-to-date. Updated Node " + received_id + " locally\n" );
 		}
 		else
 		{
 			// Update logs
-			log_area.append( "Current data is more up-to-date. Disregard changes\n" );
+			log_area.append( "Current Node " + received_id + 
+				" is more up-to-date. No changes to Node " + received_id + " locally\n" );
 		}
 	}
 
