@@ -6,8 +6,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Queue;
-import java.util.Vector;
-import java.util.concurrent.TimeUnit;
 
 public class DTReceiver implements Runnable 
 {
@@ -22,13 +20,12 @@ public class DTReceiver implements Runnable
         port = dt_port;
     }
     // Getters
-    public Queue<DTNode> get_queue()
-    {
-        return dt_queue;
-    }
+    public Queue<DTNode> get_queue() { return dt_queue; }
 
+    // Constantly receiving data and store into a Queue
     public void receive_data() throws IOException, ClassNotFoundException, InterruptedException
     {
+        // Socket variables
         ServerSocket server_socket = new ServerSocket( port );
         Socket socket = new Socket();
         while ( true )

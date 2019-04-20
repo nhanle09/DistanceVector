@@ -173,7 +173,7 @@ public class Node implements Runnable {
 		return dt;
 	}
 
-	// Produce a distance vector row with all values @ 99
+	// Produce a distance vector row with all values @ 16
 	public static HashMap<Integer, Integer> to_infinity_and_beyond(Set<Integer> node_list) 
 	{
 		HashMap<Integer, Integer> dt = new HashMap<Integer, Integer>();
