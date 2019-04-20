@@ -1,21 +1,14 @@
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.util.Scanner;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.Set;
-import java.util.Vector;
-import java.util.concurrent.TimeUnit;
-import java.util.HashSet;
-import java.lang.Thread;
-import java.lang.reflect.InvocationTargetException;
-import java.net.UnknownHostException;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.EventQueue;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.lang.Thread;
+import java.lang.reflect.InvocationTargetException;
+import java.net.UnknownHostException;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JFileChooser;
@@ -27,6 +20,11 @@ import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+import java.util.Scanner;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Vector;
+import java.util.concurrent.TimeUnit;
 
 public class DVRoute 
 {
@@ -37,9 +35,9 @@ public class DVRoute
 	private static File input_file = null;
 	private static boolean valid_file = false;
 	// Primary HashMap list of imported nodes
-	private static HashMap<Integer, DTNode> list;
+	private static HashMap<Integer, DVRow> list;
 	// HashMap of all Distance Vector nodes
-	private static HashMap<Integer, DTNode> dv_data_map;
+	private static HashMap<Integer, DVRow> dv_data_map;
 	// A 2D vector version of dv_data_map as an input for JTable
 	private static Vector<Vector<String>> dv_data_vector;
 	private static DTReceiver dt_receiver;
@@ -48,24 +46,13 @@ public class DVRoute
 	// GUI variables
 	private static JTable dv_table;
 	private static JTextArea log_area;
-	
-	// Create temporary Set for all nodes
-	private static Set<Integer> create_temp_set()
-	{
-		Set<Integer> temp_set = new HashSet<Integer>();
-		for ( int j = 1; j <= list.size(); j++ )
-		{
-			temp_set.add( j );
-		}
-		return temp_set;		
-	}
 
 	// Importing data into data structure
 	private static void data_import( File file_input ) 
 		throws FileNotFoundException 
 	{
 		// Define list into memory
-		list = new HashMap<Integer, DTNode>();
+		list = new HashMap<Integer, DVRow>();
 		Scanner input = new Scanner( file_input );
 
 		// Scanning text file to import data
@@ -85,7 +72,7 @@ public class DVRoute
 			// Add link from index 0 to 1 with cost at index 2
 			if ( !list.containsKey( line_val[0] ) ) 
 			{
-				list.put( line_val[0], new DTNode( line_val[0], new HashMap<Integer, Integer>() 
+				list.put( line_val[0], new DVRow( line_val[0], new HashMap<Integer, Integer>() 
 				{
 					private static final long serialVersionUID = 1L;
 					{
@@ -95,7 +82,7 @@ public class DVRoute
 			} 
 			else 
 			{
-				HashMap<Integer, Integer> dt = list.get( line_val[0] ).get_dt();
+				HashMap<Integer, Integer> dt = list.get( line_val[0] ).get_dvr();
 				if ( !dt.containsKey( line_val[1] ) ) 
 				{
 					dt.put( line_val[1], line_val[2] );
@@ -105,7 +92,7 @@ public class DVRoute
 			// Add link from index 1 to 0 with cost at index 2
 			if ( !list.containsKey( line_val[1] ) ) 
 			{
-				list.put( line_val[1], new DTNode( line_val[1], new HashMap<Integer, Integer>() 
+				list.put( line_val[1], new DVRow( line_val[1], new HashMap<Integer, Integer>() 
 				{
 					private static final long serialVersionUID = 1L;
 
@@ -116,7 +103,7 @@ public class DVRoute
 			} 
 			else 
 			{
-				HashMap<Integer, Integer> dt = list.get( line_val[1] ).get_dt();
+				HashMap<Integer, Integer> dt = list.get( line_val[1] ).get_dvr();
 				if ( !dt.containsKey( line_val[0] ) ) 
 				{
 					dt.put( line_val[0], line_val[2] );
@@ -149,7 +136,7 @@ public class DVRoute
 		data_import( input_file );
 
 		// Define Map and vector for master table DV nodes
-		dv_data_map = new HashMap<Integer, DTNode>();
+		dv_data_map = new HashMap<Integer, DVRow>();
 		dv_data_vector = new Vector<Vector<String>>();
 
 		// Setting up header vector information
@@ -161,25 +148,25 @@ public class DVRoute
 		for( int i = 1; i <= list.size(); i++ )
 		{
 			// New row with infinity values
-			HashMap<Integer, Integer> new_row = Node.to_infinity_and_beyond( create_temp_set() );
+			HashMap<Integer, Integer> new_row = Node.create_dvr_map( list.size() );
 			// Iterate through imported list of nodes
-			for ( Map.Entry<Integer, DTNode> j : list.entrySet() )
+			for ( Map.Entry<Integer, DVRow> j : list.entrySet() )
 			{
 				if ( j.getKey() == i )
 				{
 					// Iterate through neighbors of each node
-					for ( Map.Entry<Integer, Integer> k : j.getValue().get_dt().entrySet() )
+					for ( Map.Entry<Integer, Integer> k : j.getValue().get_dvr().entrySet() )
 					{
 						new_row.put( k.getKey() , k.getValue() );
 					}
 				}
 			}
 			// Set zero value for same source and destination
-			DTNode temp_dt_node = Node.zero_self( new DTNode( i, new_row ), i );
+			DVRow temp_dt_node = Node.zero_self( new DVRow( i, new_row ), i );
 			
 			// Set updated new row to data map and vector
 			dv_data_map.put( i , temp_dt_node );
-			dv_data_vector.add( Node.dt_to_vector( temp_dt_node ) );
+			dv_data_vector.add( Node.convert_dvr_to_vector( temp_dt_node ) );
 		}		
 	}
 	
@@ -194,6 +181,7 @@ public class DVRoute
 			dv_header.add( "Node " + Integer.toString( i ) );
 		}
 		dv_table = new JTable( dv_data_vector, dv_header );
+		log_area = new JTextArea();
 
 		// GUI Variables
 		JFrame frame = new JFrame( "Master" );
@@ -280,7 +268,7 @@ public class DVRoute
 		HashMap<Integer, Node> node_list = new HashMap<Integer, Node>();
 		for( int i = 1; i <= list.size(); i++ )
 		{
-			node_list.put( i, new Node( i, list, create_temp_set(), false ) );
+			node_list.put( i, new Node( i, list, false ) );
 		}
 		// Run each node with one thread per node
 		for ( Map.Entry<Integer, Node> entry : node_list.entrySet() )
@@ -293,16 +281,16 @@ public class DVRoute
 	// Update Distance Vector data
 	private static void update_main_dt()
 	{
-		// Pop an DTNode received and process changes to the table
-		DTNode received_dt = dt_receiver.get_queue().poll();
+		// Pop an DVRow received and process changes to the table
+		DVRow received_dt = dt_receiver.get_queue().poll();
 
 		// Compare received data and current data to see which is more up-to-date
 		int received_id = received_dt.get_id();
-		if ( !received_dt.get_dt().equals( dv_data_map.get( received_id ).get_dt() ) )
+		if ( !received_dt.get_dvr().equals( dv_data_map.get( received_id ).get_dvr() ) )
 		{
 			// Updating local data with received data
 			dv_data_map.put( received_id, received_dt );
-			dv_data_vector.set( received_id - 1, Node.dt_to_vector
+			dv_data_vector.set( received_id - 1, Node.convert_dvr_to_vector
 												( dv_data_map.get( received_id ) ) );
 			
 			DefaultTableModel table_model = ( ( DefaultTableModel ) dv_table.getModel() );

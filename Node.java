@@ -1,12 +1,10 @@
 import java.awt.Container;
 import java.awt.Dimension;
 import java.io.IOException;
-import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.UnknownHostException;
-import java.net.ServerSocket;
 import javax.swing.BoxLayout;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
@@ -21,577 +19,426 @@ import javax.swing.table.DefaultTableModel;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.Vector;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-public class Node implements Runnable {
+public class Node implements Runnable 
+{
+	// Network variables
 	private final int BASE_PORT = 5680;
-	private Socket socket;
-	private ServerSocket server_socket;
-	private int receiving_port;
 
 	// Class Distance Vector variables
-	private int node_id; // Primary Node ID
-	private DTNode node_dt; // Primary DTNode
-	private DTNode received_dt; // Received DTNode from others
-	private Map<Integer, Integer> nbr_val; // Neighbor c(S,D) values
-	private Map<Integer, DTNode> nbr_dt; // Neighbor DT list
-	private Set<Integer> node_set; // Store list of all nodes
+	private int node_id;
+	// Node's primary Distance Vector Row ( that will be send out to neighbors )
+	private DVRow primary_dvr;
+	// Received Distance Vector Row from other nodes
+	private DVRow received_dvr;
+	// Store neighboring's edge cost ( C( x, v ) values )
+	private Map<Integer, Integer> edge_cost;
+	// Store neighboring's edge Distance Vector Row ( Dv( y ) values )
+	private Map<Integer, DVRow> edge_dvr;
+
+	// Store primary DVRow and Neighbor's DVRow into a vector for JTable
 	private Vector<Vector<String>> dt_vector;
-	private DTReceiver node_dt_rec;
-	Vector<Vector<String>> nbr_data_table;
 
 	// GUI Variables
 	private JTextArea log_area;
 	private JTable dt_table;
-	JTable nbr_table;
 
 	// Constructor
-	Node(int id, HashMap<Integer, DTNode> list, Set<Integer> nbr_set, Boolean step ) 
+	Node( int id, HashMap<Integer, DVRow> list, Boolean step ) 
 	{
-		// Variable definition
-		nbr_val = new HashMap<Integer, Integer>();
-		nbr_dt = new HashMap<Integer, DTNode>();
-		dt_vector = new Vector<Vector<String>>();
-
-		// Variable assignments
+		// Variable definition and assignments
 		node_id = id;
-		node_set = nbr_set;
-		receiving_port = BASE_PORT + node_id;
+		edge_cost = new HashMap<Integer, Integer>();
+		edge_dvr = new HashMap<Integer, DVRow>();
+		dt_vector = new Vector<Vector<String>>();
+		log_area = new JTextArea();
 
-		// Add Neighbor information
-		for (Map.Entry<Integer, Integer> entry : list.get(node_id).get_dt().entrySet()) 
+		// Initialize Primary DVR with all infinity values
+		primary_dvr = new DVRow( node_id, create_dvr_map( list.size() ) );
+		// Set link cost of primary node to itself to zero
+		zero_self( primary_dvr, node_id );
+
+		// Add Neighbor information into C( x, v ) and edge DVR table
+		for ( Map.Entry<Integer, Integer> entry : list.get( node_id ).get_dvr().entrySet() ) 
 		{
-			// Add neighbor and corresponding C(x, v) value
-			nbr_val.put(entry.getKey(), entry.getValue());
+			// Add neighbor and corresponding C( x, v ) value
+			edge_cost.put( entry.getKey(), entry.getValue() );
 			// Add Neighbor infinity DV
-			nbr_dt.put(entry.getKey(), new DTNode(entry.getKey(), to_infinity_and_beyond(node_set)));
+			edge_dvr.put( entry.getKey(), 
+				new DVRow( entry.getKey(), create_dvr_map( list.size() ) ) );
 		}
 
-		// Prep primary DT
-		node_dt = new DTNode(node_id, to_infinity_and_beyond(node_set));
 		// Changed DV value of neighboring node to non-infinity values
-		for (Map.Entry<Integer, DTNode> entry : list.entrySet()) 
+		for ( Map.Entry<Integer, DVRow> entry : list.entrySet() ) 
 		{
-			if (nbr_val.containsKey(entry.getKey())) 
+			if ( edge_cost.containsKey( entry.getKey() ) ) 
 			{
-				node_dt.get_dt().put(entry.getKey(), nbr_val.get(entry.getKey()));
+				primary_dvr.get_dvr().put( entry.getKey(), edge_cost.get( entry.getKey() ) );
 			}
 		}
-		zero_self(node_dt, node_id);
-
-		dt_vector = get_dt_vector();
-		dt_table = new JTable(dt_vector, get_header_vector().get(0));
-	}
-
-	// Getters
-	int get_id() { return node_id; }
-	DTNode get_main_dt() { return node_dt; }
-	Map<Integer, DTNode> get_nbr_dt() { return nbr_dt; }
-
-	// Setters
-	void set_main_dt(DTNode dt) { node_dt = dt; }
-	void set_nbr_dt(HashMap<Integer, DTNode> dt_nbr) { nbr_dt = dt_nbr; }
-	void set_rec_dt(DTNode update_dt) { received_dt = update_dt; }
-	void set_nbr_list(HashMap<Integer, Integer> nbr_list) { nbr_val = nbr_list; }
-
-	// Check if incoming DTNode exist and different from current
-	boolean check_change_flag() 
-	{
-		int received_id = received_dt.get_id();
-		// Check if received DTNode ID exists or if it's from a neighboring node or not
-		if (nbr_dt.containsKey(received_id)) 
+		
+		// Prep Distance Table Vector for JTable inputs
+		dt_vector.add( convert_dvr_to_vector( primary_dvr ) );
+		for ( Map.Entry<Integer, DVRow> entry : edge_dvr.entrySet() ) 
 		{
-			// Check if received DTNode DV Table is the same as Received DTNode DV Table
-			if (!nbr_dt.get(received_id).get_dt().equals(received_dt.get_dt())) 
-			{
-				return true;
-			}
+			dt_vector.add( convert_dvr_to_vector( entry.getValue() ) );
 		}
-		return false;
-	}
-
-	// Update primary DVTable using Bellman-Ford
-	boolean main_dv_change() 
-	{
-		// Store current primary DV to compare changes later
-		boolean change_flag = false;
-
-		// Iterate through all keys in primary dv
-		Map<Integer, Integer> dv_table = node_dt.get_dt();
-		for (Map.Entry<Integer, Integer> dv_entry : dv_table.entrySet()) // Each node in primary D table
-		{
-			// Destination ID Dest
-			int dest_val = dv_entry.getKey();
-			// Candidates to select minimum values from
-			ArrayList<Integer> dv_candidates = new ArrayList<Integer>();
-			// Update if destination node doesn't match primary node
-			if (dv_entry.getKey() != node_id) 
-			{
-				// Iterate through each node in the neighbor to calculate c( Src, Nbr )
-				for (Map.Entry<Integer, Integer> nbr_entry : nbr_val.entrySet()) 
-				{
-					int nbr_num = nbr_entry.getValue();
-					int nbr_to_dest = nbr_dt.get(nbr_entry.getKey()).get_dt().get(dest_val);
-					dv_candidates.add(nbr_num + nbr_to_dest);
-				}
-
-				// Set the min value from the calculation as new DV if it's less than current
-				int min_dv = Collections.min(dv_candidates);
-				HashMap<Integer, Integer> temp_dv = node_dt.get_dt();
-
-				// Compare min value with current
-				if (min_dv < node_dt.get_dt().get(dest_val)) 
-				{
-					temp_dv.put(dest_val, min_dv);
-					change_flag = true;
-					node_dt.set_dt(temp_dv);
-					dt_vector.set(0, dt_to_vector(node_dt));
-
-				}
-			}
-		}
-
-		// Return boolean change result
-		if (change_flag) 
-		{
-			return true;
-		}
-		return false;
+		dt_table = new JTable( dt_vector, get_header_vector().get( 0 ) );
 	}
 
 	// Replace any entries from node to itself with zero
-	public static DTNode zero_self(DTNode dt, int self_val) 
+	public static DVRow zero_self( DVRow dt, int self_val ) 
 	{
-		HashMap<Integer, Integer> nbrdt = dt.get_dt();
-		nbrdt.put(self_val, 0);
-		dt.set_dt(nbrdt);
+		HashMap<Integer, Integer> nbrdt = dt.get_dvr();
+		nbrdt.put( self_val, 0 );
+		dt.set_dvr( nbrdt );
 		return dt;
 	}
 
-	// Produce a distance vector row with all values @ 16
-	public static HashMap<Integer, Integer> to_infinity_and_beyond(Set<Integer> node_list) 
+	// Create a distance vector row with default values set to 16 (infinity)
+	public static HashMap<Integer, Integer> create_dvr_map( int size ) 
 	{
 		HashMap<Integer, Integer> dt = new HashMap<Integer, Integer>();
-		for (Integer i : node_list) 
+		for( int i = 1; i <= size; i++ )
 		{
-			dt.put(i, 16);
+			dt.put( i, 16 );
 		}
 		return dt;
 	}
 
-	// Return a distance vector row in string format given a DTNode object
-	public static String dt_to_string(DTNode dt_row) 
+	// Return a vector that contains a row of distance vector
+	public static Vector<String> convert_dvr_to_vector( DVRow dv_row ) 
+{
+	Vector<String> dt = new Vector<String>();
+	dt.add( "Node " + Integer.toString( dv_row.get_id() ) );
+
+	for ( Map.Entry<Integer, Integer> entry : dv_row.get_dvr().entrySet() ) 
 	{
-		String result = new String();
-		for (Map.Entry<Integer, Integer> entry : dt_row.get_dt().entrySet()) 
+		dt.add( Integer.toString( entry.getValue() ) );
+	}
+	return dt;
+}
+
+	// Update primary Distance Vector Row using Bellman-Ford method
+	// and return true if updated distance(s) are lower than existing
+	boolean main_dvr_change() 
+	{
+		// Iterate through all keys in primary dv
+		Map<Integer, Integer> dvr_table = primary_dvr.get_dvr();
+		for ( Map.Entry<Integer, Integer> dvr_entry : dvr_table.entrySet() )
 		{
-			result += entry.getKey() + "(" + entry.getValue() + "), ";
+			// Destination ID Dest
+			int dest_val = dvr_entry.getKey();
+			// Candidates to select minimum values from
+			ArrayList<Integer> dv_candidates = new ArrayList<Integer>();
+			// Update if destination node doesn't match primary node
+			if ( dvr_entry.getKey() != node_id ) 
+			{
+				// Iterate through each node in the neighbor to calculate C( x, v )
+				for ( Map.Entry<Integer, Integer> edge_entry : edge_cost.entrySet() ) 
+				{
+					int edge_num = edge_entry.getValue();
+					int edge_to_dest = edge_dvr.get( edge_entry.getKey() ).get_dvr().get( dest_val );
+					dv_candidates.add( edge_num + edge_to_dest );
+				}
+
+				// Set the min value from the calculation as new DV if it's less than current
+				int min_dvr = Collections.min( dv_candidates );
+				HashMap<Integer, Integer> temp_dvr = primary_dvr.get_dvr();
+
+				// Compare min value with current
+				if ( min_dvr < primary_dvr.get_dvr().get( dest_val ) ) 
+				{
+					temp_dvr.put( dest_val, min_dvr );
+					primary_dvr.set_dvr( temp_dvr );
+					dt_vector.set( 0, convert_dvr_to_vector( primary_dvr ) );
+					return true;
+				}
+			}
 		}
-		return result;
+		return false;
 	}
 
-	// Send primary distance vector table through socket
-	void send_dt_node(int outgoing_port ) 
-		throws UnknownHostException, IOException 
+	// Return a 2D vector that contains neighbor values data
+	Vector<Vector<String>> get_edge_vector() 
+	{
+		Vector<Vector<String>> ev = new Vector<Vector<String>>();
+		Vector<String> data = new Vector<String>();
+		data.add( "C( " + Integer.toString( node_id ) + ", v )" );
+
+		// Adding neighbors to DT Vector
+		for ( Map.Entry<Integer, Integer> entry : edge_cost.entrySet() ) 
 		{
-		Socket out_socket = new Socket("127.0.0.1", outgoing_port);
-		// Creating object output stream
-		OutputStream out_stream = out_socket.getOutputStream();
-		ObjectOutputStream ob_out_stream = new ObjectOutputStream( out_socket.getOutputStream() );
-
-		//Write and flush socket helps with errors
-		ob_out_stream.writeObject( node_dt );
-		out_stream.flush();
-		out_socket.close();
+			data.add( Integer.toString( entry.getValue() ) );
+		}
+		ev.add( data );
+		return ev;
 	}
 
+	// Return a 2D vector that contains header for D( v, y ) and c( x, v )
+	Vector<Vector<String>> get_header_vector() 
+	{
+		// DV Table Header Vector
+		Vector<String> dt_header = new Vector<String>();
+		dt_header.add( "D( v, y )" );
+		for( int i = 1; i <= primary_dvr.get_dvr().size(); i++ )
+		//for ( Integer i : node_set ) 
+		{
+			dt_header.add( "Node " + Integer.toString( i ) );
+		}
+		// Neighbor Table Header Vector
+		Vector<String> nbr_header = new Vector<String>();
+		nbr_header.add( "C( x, v )" );
+		for ( Map.Entry<Integer, Integer> entry : edge_cost.entrySet() ) 
+		{
+			nbr_header.add( "Node " + Integer.toString( entry.getKey() ) );
+		}
+
+		Vector<Vector<String>> header_vector = new Vector<Vector<String>>();
+		header_vector.add( dt_header );
+		header_vector.add( nbr_header );
+
+		return header_vector;
+	}
+
+	// Broadcast main distance vector node to all neighbor host
+	void broadcast_dvr() throws UnknownHostException, IOException, InterruptedException 
+	{
+		for ( Map.Entry<Integer, Integer> entry : edge_cost.entrySet() ) 
+		{
+			send_dvr_node( BASE_PORT + entry.getKey() );
+			log_area.append( "Sent updated DT to node " + entry.getKey() + ".\n" );
+			TimeUnit.MILLISECONDS.sleep( 500 );
+		}
+	}
+	
+	// Process received Distance Vector Row and broadcast changes to neighboring edges
 	void send_and_receive() throws UnknownHostException, IOException, InterruptedException
 	{
-		node_dt_rec = new DTReceiver( receiving_port );
-		Thread receiver_thread = new Thread( node_dt_rec );
+		// Setup receiving threads
+		int receiving_port = BASE_PORT + node_id;
+		DTReceiver dvr_receiver = new DTReceiver( receiving_port );
+		Thread receiver_thread = new Thread( dvr_receiver );
 		receiver_thread.start();
 
-		log_area.append("Listening for TCP traffic on port " + receiving_port + "\n");
+		// Log
+		log_area.append( "Listening for TCP traffic on port " + receiving_port + "\n" );
 
+		// Process any received Distance Vector Row
 		while( true )
 		{
-			received_dt = node_dt_rec.get_queue().poll();
+			// Pop the first element from received list
+			received_dvr = dvr_receiver.get_queue().poll();
 
-			if ( received_dt != null )
+			if ( received_dvr != null )
 			{
-				//received_dt = node_dt_rec.get_queue().remove( 0 );
-				
-
-				log_area.append("Received from " + received_dt.get_id() + ": " 
-					+ dt_to_string( received_dt ) + ".\n");
-					
-				// Check if received DV row is different than current
-				if (check_change_flag()) 
+				// Logs received Distance Vector Row
+				String dvr_string = new String();
+				for ( Map.Entry<Integer, Integer> entry : received_dvr.get_dvr().entrySet() ) 
 				{
-					// Update current neighbor DV row to received if different
-					update_nbr_dt();
+					dvr_string += entry.getKey() + "(" + entry.getValue() + "), ";
+				}
+				log_area.append( "Received from " + received_dvr.get_id() + ": " + dvr_string + ".\n" );
+					
+				// Changes current edge's DVRow to received DVRow if it's different
+				if ( !edge_dvr.get( received_dvr.get_id() ).get_dvr().equals( received_dvr.get_dvr() ) )
+				{
+					edge_dvr.put( received_dvr.get_id(), received_dvr );
+					// Update the changes to Distance Table Vector that being used in the JTable
+					int i = 1;
+					for ( Map.Entry<Integer, Integer> entry : edge_cost.entrySet() ) 
+					{
+						if ( received_dvr.get_id() == entry.getKey() ) 
+						{
+							dt_vector.set( i, convert_dvr_to_vector( received_dvr ) );
+							break;
+						}
+						i++;
+					}
 
-					// Set variable
-					log_area.append("Updated received DT to neighbor.\n");
+					// Log the changes and refresh the JTable to show changes
+					log_area.append( "Updated received DT to neighbor.\n" );
 					refresh_table();
 
 					// Update the main DV row and report if any changes were made
-					if (main_dv_change()) 
+					if ( main_dvr_change() ) 
 					{
+						// Log the changes and refresh the JTable to show changes
 						refresh_table();
-						// Log for changes
-						log_area.append("Updated Primary DT using Bellman-Ford.\n");
-						broadcast_dt();
+						log_area.append( "Updated Primary DT using Bellman-Ford.\n" );
+
+						// Broadcast the changes
+						broadcast_dvr();
 					} 
 					else 
 					{
-						log_area.append("Primary DT up-to-date. No need to broadcast changes.\n");
+						log_area.append( "Primary DT up-to-date. No need to broadcast changes.\n" );
 					}
-					send_dt_node( BASE_PORT );
-					log_area.append("Sent updated DT to master\n");
+					send_dvr_node( BASE_PORT );
+					log_area.append( "Sent updated DT to master\n" );
 				} 				
 			}
 			TimeUnit.MILLISECONDS.sleep( 500 );
 		}
 	}
-
-	// Receiving DV information and trigger broadcast changes
-	void receive_and_send() throws IOException, ClassNotFoundException, InterruptedException 
+	
+	// Send primary distance vector table through socket
+	void send_dvr_node( int outgoing_port ) throws UnknownHostException, IOException 
 	{
-		server_socket = new ServerSocket(receiving_port);
-		log_area.append("Listening for TCP traffic on port " + receiving_port + "\n");
+		// Socket and Output stream variables
+		Socket out_socket = new Socket( "127.0.0.1", outgoing_port );
+		OutputStream out_stream = out_socket.getOutputStream();
+		ObjectOutputStream ob_out_stream = new ObjectOutputStream( out_stream );
 
-		// Main loop accepting connection and sending distance vector nodes
-		while (true) {
-			// Socket accepting incoming connection
-			socket = server_socket.accept();
-
-			// Using input stream to receive objects
-			ObjectInputStream ob_in_stream = new ObjectInputStream( socket.getInputStream() );
-
-			// Reading incoming object and cast it to DTNode
-			received_dt = (DTNode) ob_in_stream.readObject();
-
-			log_area.append("Received from " + received_dt.get_id() + ": " + dt_to_string(received_dt) + ".\n");
-
-			// Check if received DV row is different than current
-			if (check_change_flag()) 
-			{
-				// Update current neighbor DV row to received if different
-				update_nbr_dt();
-
-				// Set variable
-				log_area.append("Updated received DT to neighbor.\n");
-				refresh_table();
-
-				// Update the main DV row and report if any changes were made
-				if (main_dv_change()) 
-				{
-					refresh_table();
-					// Log for changes
-					log_area.append("Updated Primary DT using Bellman-Ford.\n");
-					broadcast_dt();
-
-					send_dt_node( BASE_PORT );
-					log_area.append("Sent updated DT to master\n");
-				} 
-				else 
-				{
-					log_area.append("Primary DT up-to-date. No need to broadcast changes.\n");
-				}
-			} 
-			else 
-			{
-				log_area.append("Neighbors' DTs up-to-date. Disregarding received DT.");
-			}
-
-			//TimeUnit.SECONDS.sleep(1);
-		}
+		//Write and flush socket helps with errors
+		ob_out_stream.writeObject( primary_dvr );
+		out_stream.flush();
+		out_socket.close();
 	}
 
-	// Refresh table after data change
+	// Refresh JTable to show user the changes on the GUI
 	void refresh_table() 
 	{
-		DefaultTableModel table_model = ((DefaultTableModel) dt_table.getModel());
+		DefaultTableModel table_model = ( ( DefaultTableModel ) dt_table.getModel() );
 		table_model.fireTableDataChanged();
-		dt_table.setModel(table_model);
+		dt_table.setModel( table_model );
 	}
 
 	// Setup All the GUIs
 	void setup_gui() 
 	{
-		// Setup log variables log_area
-		log_area = new JTextArea("Logs for node " + node_id + "\n");
-
-		// JTable variables
-		nbr_data_table = get_nbr_vector();
-		nbr_table = new JTable( nbr_data_table, get_header_vector().get(1) );
-
-		// Alignment for all JTables
+		// Variables
+		JFrame frame = new JFrame( "Node " + node_id );
+		Vector<Vector<String>> edge_vector = get_edge_vector();
+		JTable edge_table = new JTable( edge_vector, get_header_vector().get( 1 ) );
+		JScrollPane nbr_scroll = new JScrollPane( edge_table );
+		JScrollPane dt_scroll = new JScrollPane( dt_table );
+		JScrollPane log_scroll = new JScrollPane( log_area );
+		Container main_container = new Container();
+		JPanel panel = new JPanel();
 		DefaultTableCellRenderer c_render = new DefaultTableCellRenderer();
-		c_render.setHorizontalAlignment(SwingConstants.CENTER);
-
+		
+		// Alignment for all JTables
+		c_render.setHorizontalAlignment( SwingConstants.CENTER );
 		// Center Align neighbor data
-		nbr_table.setDefaultRenderer(String.class, c_render);
-		for (int i = 1; i < nbr_table.getColumnCount(); i++) 
+		edge_table.setDefaultRenderer( String.class, c_render );
+		for ( int i = 1; i < edge_table.getColumnCount(); i++ ) 
 		{
-			nbr_table.getColumnModel().getColumn(i).setCellRenderer(c_render);
+			edge_table.getColumnModel().getColumn( i ).setCellRenderer( c_render );
 		}
-
 		// Center Align Main DT data
-		dt_table.setDefaultRenderer(String.class, c_render);
-		for (int i = 1; i < dt_table.getColumnCount(); i++) 
+		dt_table.setDefaultRenderer( String.class, c_render );
+		for ( int i = 1; i < dt_table.getColumnCount(); i++ ) 
 		{
-			dt_table.getColumnModel().getColumn(i).setCellRenderer(c_render);
+			dt_table.getColumnModel().getColumn( i ).setCellRenderer( c_render );
 		}
-
-
-		// GUI variables definition and initialization
-		JFrame frame = new JFrame("Node " + node_id);
-		JScrollPane nbr_scroll = new JScrollPane(nbr_table);
-		JScrollPane dt_scroll = new JScrollPane(dt_table);
-		JScrollPane log_scroll = new JScrollPane(log_area);
 
 		// Setting custom sizes for each JScrollPane
-		nbr_scroll.setMaximumSize(new Dimension(450, 50));
-		dt_scroll.setMaximumSize(new Dimension(450, 110));
-		log_scroll.setMaximumSize(new Dimension(450, 150));
+		nbr_scroll.setMaximumSize( new Dimension( 450, 50 ) );
+		dt_scroll.setMaximumSize( new Dimension( 450, 125 ) );
+		log_scroll.setMaximumSize( new Dimension( 450, 150 ) );
 
 		// Setup container
-		Container main_container = new Container();
-		main_container.add( nbr_scroll);
-		main_container.add( dt_scroll);
-		main_container.add( log_scroll);
-		main_container.setLayout(new BoxLayout(main_container, BoxLayout.Y_AXIS));
+		main_container.add( nbr_scroll );
+		main_container.add( dt_scroll );
+		main_container.add( log_scroll );
+		main_container.setLayout( new BoxLayout( main_container, BoxLayout.Y_AXIS ) );
 
 		// Setup main scroller
-		JPanel panel = new JPanel();
-		panel.add(main_container);
+		panel.add( main_container );
 
 		// Mainframe modification and show
-		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		frame.add(panel);
-		frame.setSize(500, 400);
-		frame.setVisible(true);
-	}
+		frame.setDefaultCloseOperation( JFrame.EXIT_ON_CLOSE );
+		frame.add( panel );
+		frame.setSize( 475, 400 );
+		frame.setVisible( true );
 
-	// Broadcast main distance vector node to all neighbor host
-	void broadcast_dt() 
-		throws UnknownHostException, IOException, InterruptedException 
-	{
-		for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
-		{
-			send_dt_node(BASE_PORT + entry.getKey() );
-			log_area.append("Sent updated DT to node " + entry.getKey() + ".\n");
-			TimeUnit.MILLISECONDS.sleep(500);
-		}
-		//send_dt_node( BASE_PORT );
-		//log_area.append("Sent updated DT to master\n");
-	}
-
-	// Update neighbor Distance Vector Table
-	void update_nbr_dt() 
-	{
-		if (check_change_flag()) 
-		{
-			nbr_dt.put(received_dt.get_id(), received_dt);
-
-			int i = 1;
-			for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
-			{
-				if (received_dt.get_id() == entry.getKey()) 
-				{
-					dt_vector.set(i, dt_to_vector(received_dt));
-					break;
-				}
-				i++;
-			}
-		}
-	}
-
-	// Return a vector that contains a row of distance vector
-	public static Vector<String> dt_to_vector(DTNode dtnode) 
-	{
-		Vector<String> dt = new Vector<String>();
-		dt.add("Node " + Integer.toString(dtnode.get_id()));
-
-		for (Map.Entry<Integer, Integer> entry : dtnode.get_dt().entrySet()) 
-		{
-			dt.add(Integer.toString(entry.getValue()));
-		}
-
-		return dt;
-	}
-
-	// Return a 2D vector that contains all the node and neighbor DT
-	Vector<Vector<String>> get_dt_vector() 
-	{
-		Vector<Vector<String>> dt = new Vector<Vector<String>>();
-		dt.add(dt_to_vector(node_dt));
-		for (Map.Entry<Integer, DTNode> entry : nbr_dt.entrySet()) 
-		{
-			dt.add(dt_to_vector(entry.getValue()));
-		}
-		return dt;
-	}
-
-	// Return a 2D vector that contains header for D(v, y) and c(x, v)
-	Vector<Vector<String>> get_header_vector() 
-	{
-		// DV Table Header Vector
-		Vector<String> dt_header = new Vector<String>();
-		dt_header.add("D(v, y)");
-		for (Integer i : node_set) 
-		{
-			dt_header.add("Node " + Integer.toString(i));
-		}
-		// Neighbor Table Header Vector
-		Vector<String> nbr_header = new Vector<String>();
-		nbr_header.add("C(x, v)");
-		for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
-		{
-			nbr_header.add("Node " + Integer.toString(entry.getKey()));
-		}
-
-		Vector<Vector<String>> header_vector = new Vector<Vector<String>>();
-		header_vector.add(dt_header);
-		header_vector.add(nbr_header);
-
-		return header_vector;
-	}
-
-	// Return a 2D vector that contains neighbor values data
-	Vector<Vector<String>> get_nbr_vector() 
-	{
-		Vector<Vector<String>> nbr_val_vector = new Vector<Vector<String>>();
-		Vector<String> data = new Vector<String>();
-		data.add("C(" + Integer.toString(node_id) + ",v)");
-
-		// Adding neighbors to DT Vector
-		for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
-		{
-			data.add(Integer.toString(entry.getValue()));
-		}
-		nbr_val_vector.add(data);
-		return nbr_val_vector;
-	}
-
-	void listen_data_change()
-	{
-		nbr_table.getModel().addTableModelListener( (TableModelListener) new TableModelListener() 
+		// Setup table listening events
+		edge_table.getModel().addTableModelListener( ( TableModelListener ) new TableModelListener() 
 		{
 			public void tableChanged( TableModelEvent e )
 			{
-				if ( ! nbr_data_table.get( 0 ).equals( get_nbr_vector().get( 0 ) ) )
+				// Comparing changes with existing values from edge table
+				if ( ! edge_vector.get( 0 ).equals( get_edge_vector().get( 0 ) ) )
 				{
 					int j = 1;
-					for ( Map.Entry<Integer, Integer> entry : nbr_val.entrySet() )
+					for ( Map.Entry<Integer, Integer> entry : edge_cost.entrySet() )
 					{
-						nbr_val.put( entry.getKey(), Integer.parseInt( nbr_data_table.get( 0 ).get( j ) ) );
+						edge_cost.put( entry.getKey(), Integer.parseInt( edge_vector.get( 0 ).get( j ) ) );
 						j++;
 					}
 
 					log_area.append( "Neighbor link changed. Updating DV.\n" );
 					// Update the main DV row and report if any changes were made
-					if (main_dv_change()) 
+					if ( main_dvr_change() ) 
 					{
 						refresh_table();
 						// Log for changes
-						log_area.append("Updated Primary DT using Bellman-Ford.\n");
+						log_area.append( "Updated Primary DT using Bellman-Ford.\n" );
 	
-						// Broadcast changes after updating main DV table
-						for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
-						{
-							try {
-								broadcast_dt();
-								send_dt_node( BASE_PORT );
-								log_area.append("Sent updated DT to master\n");
-							} catch (UnknownHostException e1) {
-								// TODO Auto-generated catch block
-								e1.printStackTrace();
-							} catch (IOException e1) {
-								// TODO Auto-generated catch block
-								e1.printStackTrace();
-							} catch (InterruptedException e1) {
-								// TODO Auto-generated catch block
-								e1.printStackTrace();
-							}
+						try {
+							broadcast_dvr();
+							send_dvr_node( BASE_PORT );
+							log_area.append( "Sent updated DT to master\n" );
+						} catch ( UnknownHostException e1 ) {
+							log_area.append( "Node: Unknown Host Exception\n" );
+							e1.printStackTrace();
+						} catch ( IOException e1 ) {
+							log_area.append( "Node: IO Exception\n" );
+							e1.printStackTrace();
+						} catch ( InterruptedException e1 ) {
+							log_area.append( "Node: Interrupt Exception\n" );
+							e1.printStackTrace();
 						}
 					} 				
 				}
 			}
-		});
+		} );
+
 	}
 
 	// Overriding Run method
 	@Override
 	public void run() 
 	{
-
 		setup_gui();
-		// Listening for any changes in the table and update values
-		listen_data_change();
 
+		// Setup timer to broadcast primary DVRow
+		// with every 3 seconds with initial 2 seconds delay
 		Timer timer = new Timer();
 		timer.schedule( new TimerTask()
 		{
 			@Override
 			public void run() 
 			{
-				try 
-				{
-					broadcast_dt();
-				} catch (UnknownHostException e) 
-				{
-					// TODO Auto-generated catch block
+				try {
+					broadcast_dvr();
+				} catch ( UnknownHostException e ) {
+					log_area.append( "Unknown Host Exception\n" );
 					e.printStackTrace();
-				} catch (IOException e) 
-				{
-					// TODO Auto-generated catch block
+				} catch ( IOException e ) {
+					log_area.append( "IO Exception\n" );
 					e.printStackTrace();
-				} catch (InterruptedException e) 
-				{
-					// TODO Auto-generated catch block
+				} catch ( InterruptedException e ) {
+					log_area.append( "Interruptted Exception\n" );
 					e.printStackTrace();
 				}
 			}
-		}, 3000, 3000 );
+		}, 2000, 3000 );
 
-		
-
-		// try {
-		// 	send_and_receive();
-		// } catch (UnknownHostException e) {
-		// 	// TODO Auto-generated catch block
-		// 	e.printStackTrace();
-		// } catch (IOException e) {
-		// 	// TODO Auto-generated catch block
-		// 	e.printStackTrace();
-		// } catch (InterruptedException e) {
-		// 	// TODO Auto-generated catch block
-		// 	e.printStackTrace();
-		// }
-
-		try 
-		{
+		// Beging sending and receiving nodes
+		try {
 			send_and_receive();
-			//receive_and_send();
-		} 
-		catch (IOException | InterruptedException e) 
-		{
-			// TODO Auto-generated catch block
+		} catch ( IOException | InterruptedException e ) {
+			log_area.append( "IO/Interrupted Exception\n" );
 			e.printStackTrace();
 		}
 		
 	}
 	
-	public static void main( String[] args )
-	{
-
-    }
 }

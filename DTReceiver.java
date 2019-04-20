@@ -9,10 +9,12 @@ import java.util.Queue;
 
 public class DTReceiver implements Runnable 
 {
-    private Queue<DTNode> dt_queue;
+    // Variables
+    private Queue<DVRow> dt_queue;
     private int port;
     private HashSet<HashMap<Integer, Integer>> mgt_queue;
 
+    // Constructors
     DTReceiver(int dt_port) 
     {
         mgt_queue = new HashSet<HashMap<Integer, Integer>>();
@@ -20,28 +22,28 @@ public class DTReceiver implements Runnable
         port = dt_port;
     }
     // Getters
-    public Queue<DTNode> get_queue() { return dt_queue; }
+    public Queue<DVRow> get_queue() { return dt_queue; }
 
-    // Constantly receiving data and store into a Queue
+    // Receiving data and store it into a queue
     public void receive_data() throws IOException, ClassNotFoundException, InterruptedException
     {
         // Socket variables
-        ServerSocket server_socket = new ServerSocket( port );
+        ServerSocket server_socket = new ServerSocket(port);
         Socket socket = new Socket();
         while ( true )
         {
+            // Receiving and casting objects to DVRow
             socket = server_socket.accept();
             ObjectInputStream obj_instream = new ObjectInputStream ( socket.getInputStream() );
+            DVRow received_dt = ( DVRow ) obj_instream.readObject();
 
-            DTNode received_dt = ( DTNode ) obj_instream.readObject();
-
-            if( !mgt_queue.contains( received_dt.get_dt() ) )
+            // Using HashSet management queue to ignore duplicate DTs by comparing
+            // the received HashMap with what existed 
+            if( !mgt_queue.contains( received_dt.get_dvr() ) )
             {
-                mgt_queue.add( received_dt.get_dt() );
+                mgt_queue.add( received_dt.get_dvr() );
                 dt_queue.add( received_dt );
             }
-            
-            //dt_queue.add( ( DTNode ) obj_instream.readObject() );
         }
     }
 
@@ -51,15 +53,14 @@ public class DTReceiver implements Runnable
         try {
 			receive_data();
 		} catch (ClassNotFoundException e) {
-			// TODO Auto-generated catch block
+			System.out.println( "DTReceiver: Class Not Found Exception" );
 			e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
+			System.out.println( "DTReceiver: IO Exception" );
 			e.printStackTrace();
 		} catch (InterruptedException e) {
-            // TODO Auto-generated catch block
+            System.out.println( "DTReceiver: Interrupted Exception" );
             e.printStackTrace();
         }
     }
-
 }
