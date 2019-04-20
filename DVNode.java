@@ -25,7 +25,7 @@ import java.util.Vector;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-public class Node implements Runnable 
+public class DVNode implements Runnable 
 {
 	// Network variables
 	private final int BASE_PORT = 5680;
@@ -49,7 +49,7 @@ public class Node implements Runnable
 	private JTable dt_table;
 
 	// Constructor
-	Node( int id, HashMap<Integer, DVRow> list, Boolean step ) 
+	DVNode( int id, HashMap<Integer, DVRow> list, Boolean step ) 
 	{
 		// Variable definition and assignments
 		node_id = id;
@@ -222,7 +222,7 @@ public class Node implements Runnable
 	{
 		// Setup receiving threads
 		int receiving_port = BASE_PORT + node_id;
-		DTReceiver dvr_receiver = new DTReceiver( receiving_port );
+		DVReceiver dvr_receiver = new DVReceiver( receiving_port );
 		Thread receiver_thread = new Thread( dvr_receiver );
 		receiver_thread.start();
 

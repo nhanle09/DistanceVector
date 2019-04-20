@@ -26,7 +26,7 @@ import java.util.HashMap;
 import java.util.Vector;
 import java.util.concurrent.TimeUnit;
 
-public class DVRoute 
+public class DVMaster 
 {
 	// Constants
 	static final int BASE_PORT = 5680;
@@ -40,7 +40,7 @@ public class DVRoute
 	private static HashMap<Integer, DVRow> dv_data_map;
 	// A 2D vector version of dv_data_map as an input for JTable
 	private static Vector<Vector<String>> dv_data_vector;
-	private static DTReceiver dt_receiver;
+	private static DVReceiver dvr_receiver;
 	
 	
 	// GUI variables
@@ -120,7 +120,7 @@ public class DVRoute
 		while( true )
 		{
 			// Check if the received data queue is empty before processing
-			if( dt_receiver.get_queue().size() != 0 )
+			if( dvr_receiver.get_queue().size() != 0 )
 			{
 				update_main_dt();
 			}
@@ -148,7 +148,7 @@ public class DVRoute
 		for( int i = 1; i <= list.size(); i++ )
 		{
 			// New row with infinity values
-			HashMap<Integer, Integer> new_row = Node.create_dvr_map( list.size() );
+			HashMap<Integer, Integer> new_row = DVNode.create_dvr_map( list.size() );
 			// Iterate through imported list of nodes
 			for ( Map.Entry<Integer, DVRow> j : list.entrySet() )
 			{
@@ -162,11 +162,11 @@ public class DVRoute
 				}
 			}
 			// Set zero value for same source and destination
-			DVRow temp_dt_node = Node.zero_self( new DVRow( i, new_row ), i );
+			DVRow temp_dv_row = DVNode.zero_self( new DVRow( i, new_row ), i );
 			
 			// Set updated new row to data map and vector
-			dv_data_map.put( i , temp_dt_node );
-			dv_data_vector.add( Node.convert_dvr_to_vector( temp_dt_node ) );
+			dv_data_map.put( i , temp_dv_row );
+			dv_data_vector.add( DVNode.convert_dvr_to_vector( temp_dv_row ) );
 		}		
 	}
 	
@@ -233,7 +233,7 @@ public class DVRoute
 		{
 			public void actionPerformed( ActionEvent e )
 			{
-				if ( dt_receiver.get_queue().peek() != null )
+				if ( dvr_receiver.get_queue().peek() != null )
 				{
 					update_main_dt();
 				}
@@ -256,8 +256,8 @@ public class DVRoute
 				throws UnknownHostException, IOException, InterruptedException
 	{
 		// Start Master receiving threads
-		dt_receiver = new DTReceiver( BASE_PORT );		
-		Thread receiver_thread = new Thread( dt_receiver );
+		dvr_receiver = new DVReceiver( BASE_PORT );		
+		Thread receiver_thread = new Thread( dvr_receiver );
 		receiver_thread.start();
 		log_area.append( "Master node listening on port " + BASE_PORT + "\n" );
 
@@ -265,13 +265,13 @@ public class DVRoute
 		TimeUnit.SECONDS.sleep( 1 );
 
 		// Create a Map of all master Node( s )
-		HashMap<Integer, Node> node_list = new HashMap<Integer, Node>();
+		HashMap<Integer, DVNode> node_list = new HashMap<Integer, DVNode>();
 		for( int i = 1; i <= list.size(); i++ )
 		{
-			node_list.put( i, new Node( i, list, false ) );
+			node_list.put( i, new DVNode( i, list, false ) );
 		}
 		// Run each node with one thread per node
-		for ( Map.Entry<Integer, Node> entry : node_list.entrySet() )
+		for ( Map.Entry<Integer, DVNode> entry : node_list.entrySet() )
 		{
 			Thread temp_thread = new Thread( entry.getValue() );
 			temp_thread.start();
@@ -282,7 +282,7 @@ public class DVRoute
 	private static void update_main_dt()
 	{
 		// Pop an DVRow received and process changes to the table
-		DVRow received_dt = dt_receiver.get_queue().poll();
+		DVRow received_dt = dvr_receiver.get_queue().poll();
 
 		// Compare received data and current data to see which is more up-to-date
 		int received_id = received_dt.get_id();
@@ -290,7 +290,7 @@ public class DVRoute
 		{
 			// Updating local data with received data
 			dv_data_map.put( received_id, received_dt );
-			dv_data_vector.set( received_id - 1, Node.convert_dvr_to_vector
+			dv_data_vector.set( received_id - 1, DVNode.convert_dvr_to_vector
 												( dv_data_map.get( received_id ) ) );
 			
 			DefaultTableModel table_model = ( ( DefaultTableModel ) dv_table.getModel() );

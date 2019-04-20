@@ -7,7 +7,7 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Queue;
 
-public class DTReceiver implements Runnable 
+public class DVReceiver implements Runnable 
 {
     // Variables
     private Queue<DVRow> dt_queue;
@@ -15,7 +15,7 @@ public class DTReceiver implements Runnable
     private HashSet<HashMap<Integer, Integer>> mgt_queue;
 
     // Constructors
-    DTReceiver(int dt_port) 
+    DVReceiver(int dt_port) 
     {
         mgt_queue = new HashSet<HashMap<Integer, Integer>>();
         dt_queue = new LinkedList<>();
@@ -53,13 +53,13 @@ public class DTReceiver implements Runnable
         try {
 			receive_data();
 		} catch (ClassNotFoundException e) {
-			System.out.println( "DTReceiver: Class Not Found Exception" );
+			System.out.println( "DVReceiver: Class Not Found Exception" );
 			e.printStackTrace();
 		} catch (IOException e) {
-			System.out.println( "DTReceiver: IO Exception" );
+			System.out.println( "DVReceiver: IO Exception" );
 			e.printStackTrace();
 		} catch (InterruptedException e) {
-            System.out.println( "DTReceiver: Interrupted Exception" );
+            System.out.println( "DVReceiver: Interrupted Exception" );
             e.printStackTrace();
         }
     }
