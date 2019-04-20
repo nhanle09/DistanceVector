@@ -1,20 +1,17 @@
 import java.util.Scanner;
 import java.util.Map;
-import java.util.Random;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.ObjectInputStream;
 import java.util.HashMap;
 import java.util.Set;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.Vector;
 import java.util.concurrent.TimeUnit;
 import java.util.HashSet;
 import java.lang.Thread;
 import java.lang.reflect.InvocationTargetException;
-import java.net.ServerSocket;
-import java.net.Socket;
 import java.net.UnknownHostException;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -44,18 +41,21 @@ public class DVRoute
 	private static File input_file = null;
 	private static boolean got_file = false;
 	private static boolean dv_change;
+	private static boolean step_flag = false;
 
 	// Data variables
 	private static HashMap<Integer, DTNode> list;
 	private static HashMap<Integer, DTNode> dv_data_map;
 	private static Vector<Vector<String>> dv_data_vector;
 	private static Set<Integer> node_set;
+	private static DTReceiver dt_receiver;
 	
 	// GUI variables
 	private static JFrame frame;
 	private static JTable dv_table;
 	private static JTextArea log_area;
 	private static JButton step_button;
+	private static JButton single_button;
 	
 	public static HashMap<Integer, DTNode> data_import( File file_input ) 
 	throws FileNotFoundException 
@@ -186,9 +186,11 @@ public class DVRoute
 		dv_table = new JTable( dv_data_vector, dv_header );
 		log_area = new JTextArea( "Log for master node\n" );
 		step_button = new JButton( "Step" );
+		single_button = new JButton( "Single" );
 		JScrollPane dv_scroll = new JScrollPane( dv_table );
 		JScrollPane log_scroll = new JScrollPane( log_area );
 		JScrollPane step_scroll = new JScrollPane( step_button );
+		JScrollPane single_scroll = new JScrollPane( single_button );
 
 
 
@@ -217,25 +219,49 @@ public class DVRoute
 
 		// Store components into Container
 		Container container = new Container();
+		container.add( step_scroll );
 		container.add( dv_scroll );
 		container.add( log_scroll );
-		container.add( step_scroll );
 		container.setLayout( new BoxLayout( container, BoxLayout.Y_AXIS ) );
 
 		// Store container into Panel
 		JPanel panel = new JPanel();
 		panel.add( container );
 
+		//
+		if( step_flag == true )
+		{
+			step_button.setEnabled( false );
+		}
+
 		// Set frame properties and display
 		frame.setDefaultCloseOperation( JFrame.EXIT_ON_CLOSE );
 		frame.add( panel );
-		frame.setSize( 475, 375 );
+		frame.setSize( 475, 475 );
+		frame.setVisible( true );
+
+		Timer timer = new Timer();
+		timer.schedule( new TimerTask() 
+		{
+			@Override
+			public void run()
+			{
+				System.out.println( "Master Queue is " + dt_receiver.get_queue().size() );
+			}
+		}, 3000, 2000 );
 
 		step_button.addActionListener( new ActionListener()
 		{
 			public void actionPerformed( ActionEvent e )
 			{
-				GlobalVar.trigger = true;
+				if ( dt_receiver.get_queue().peek() != null )
+				{
+					update_main_dt();
+				}
+				else
+				{
+					log_area.append( "Reached Stable state. No more clicking\n" );
+				}
 			}
 		});
 	}
@@ -256,85 +282,61 @@ public class DVRoute
 			Thread temp_thread = new Thread( entry.getValue() );
 			temp_thread.start();
 		}
-		frame.setVisible( true );
-
-
-		// Have one random node except node 1 to broadcast changes
-		Random rand_gen = new Random();
-		int start_node = rand_gen.nextInt( node_list.size() - 1 ) + 2;
-		Node start = node_list.get( start_node );
-		log_area.append( "Node " + start_node + " started broadcasting\n" );
-		start.broadcast_dt();
 	}
 
-
-	// Setup network for receiving data
-	private static void start_network() throws IOException, ClassNotFoundException, InterruptedException
+	static void continuous_mode() throws InterruptedException
 	{
-		Socket socket;
-		ServerSocket master_socket = new ServerSocket( BASE_PORT );
-		log_area.append( "Started listening on port " + BASE_PORT + "\n" );
-
-		//final long startTime = System.currentTimeMillis();
-
-
-		while ( true )
+		while( true )
 		{
-			// Set initial change variables
-			dv_change = false;
-
-			// Socket variables
-			socket = master_socket.accept();
-
-			// Using input stream to receive objects
-			InputStream in_stream = socket.getInputStream();
-			ObjectInputStream ob_in_stream = new ObjectInputStream( in_stream );
-
-			// Reading incoming object and cast it to DTNode
-			DTNode received_dt = ( DTNode ) ob_in_stream.readObject();
-		
-			// Logs
-			log_area.append( "Received from Node " + received_dt.get_id() + ": " );
-			log_area.append( Node.dt_to_string( received_dt ) + "\n" );
-
-			if ( !received_dt.get_dt().equals( dv_data_map.get( received_dt.get_id() ).get_dt() ) )
+			if( dt_receiver.get_queue().size() != 0 )
 			{
-				// Updating local data with received data
-				dv_data_map.put( received_dt.get_id(), received_dt );
-				dv_data_vector.set( received_dt.get_id() - 1, 
-					Node.dt_to_vector( dv_data_map.get( received_dt.get_id() ) ) );
-				
-				DefaultTableModel table_model = ( ( DefaultTableModel ) dv_table.getModel() );
-				table_model.fireTableDataChanged();
-				dv_table.setModel( table_model );	
-				
-				// Update logs
-				log_area.append( "Received data is more up-to-date. Updated local\n" );
-
-				// Update change variables
-				dv_change = true;
+				update_main_dt();
 			}
-			else
-			{
-				// Update logs
-				log_area.append( "Current data is more up-to-date. Disregard changes\n" );
-			}
-
-			// Exit the program based on changes detection
-			if ( dv_change == false )
-			{
-				log_area.append( "Stable state detected. Exiting program " );
-				master_socket.close();
-				break;
-			}
-			TimeUnit.MILLISECONDS.sleep(500);
+			TimeUnit.MILLISECONDS.sleep( 500 );
 		}
 	}
 
-	public static void main( String[] args )
-			throws FileNotFoundException, IOException, UnknownHostException, 
-			InterruptedException, InvocationTargetException, ClassNotFoundException
+	static void update_main_dt()
+	{
+		DTNode received_dt = dt_receiver.get_queue().poll();
+
+		if ( !received_dt.get_dt().equals( dv_data_map.get( received_dt.get_id() ).get_dt() ) )
+		{
+			// Updating local data with received data
+			dv_data_map.put( received_dt.get_id(), received_dt );
+			dv_data_vector.set( received_dt.get_id() - 1, 
+				Node.dt_to_vector( dv_data_map.get( received_dt.get_id() ) ) );
+			
+			DefaultTableModel table_model = ( ( DefaultTableModel ) dv_table.getModel() );
+			table_model.fireTableDataChanged();
+			dv_table.setModel( table_model );	
+			
+			// Update logs
+			log_area.append( "Received data is more up-to-date. Updated local\n" );
+
+			// Update change variables
+			dv_change = true;
+		}
+		else
+		{
+			// Update logs
+			log_area.append( "Current data is more up-to-date. Disregard changes\n" );
+		}
+	}
+
+	public static void main( String[] args ) throws 
+		FileNotFoundException, IOException, UnknownHostException, InterruptedException, 
+			InvocationTargetException, ClassNotFoundException
   	{
+		if( args.length == 1 )
+		{
+			if( args[0].equals( "-s" ) );
+			{
+				step_flag = true;
+			}
+		}
+
+
 		// Selecting File starting with current directory through JFileChooser
 		EventQueue.invokeAndWait( new Runnable() 
 		{
@@ -351,22 +353,25 @@ public class DVRoute
 		} );
 
 		if( got_file )
-		{
-			
+		{			
 			setup_data();
 			setup_gui();
 
+			dt_receiver = new DTReceiver( BASE_PORT );		
+			Thread receiver_thread = new Thread( dt_receiver );
+			receiver_thread.start();
+			log_area.append( "Master node listening on port " + BASE_PORT + "\n" );
+
 			start_program();
-			start_network();
 
-
-					
+			if( step_flag == true )
+			{
+				continuous_mode();
+			}
 		}
 		else
 		{
 			System.exit( 0 );
 		}
-		
 	}
-	
 }

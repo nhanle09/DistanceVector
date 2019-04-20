@@ -1,7 +1,5 @@
 import java.awt.Container;
 import java.awt.Dimension;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -10,7 +8,6 @@ import java.net.Socket;
 import java.net.UnknownHostException;
 import java.net.ServerSocket;
 import javax.swing.BoxLayout;
-import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -21,19 +18,19 @@ import javax.swing.event.TableModelEvent;
 import javax.swing.event.TableModelListener;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Set;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.Vector;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public class Node implements Runnable {
-	// Class network variables
-	static final int BASE_PORT = 5680;
-	static Socket socket;
+	private final int BASE_PORT = 5680;
+	private Socket socket;
 	private ServerSocket server_socket;
 	private int receiving_port;
 
@@ -45,11 +42,13 @@ public class Node implements Runnable {
 	private Map<Integer, DTNode> nbr_dt; // Neighbor DT list
 	private Set<Integer> node_set; // Store list of all nodes
 	private Vector<Vector<String>> dt_vector;
-	private Boolean _step;
+	private DTReceiver node_dt_rec;
+	Vector<Vector<String>> nbr_data_table;
 
 	// GUI Variables
 	private JTextArea log_area;
 	private JTable dt_table;
+	JTable nbr_table;
 
 	// Constructor
 	Node(int id, HashMap<Integer, DTNode> list, Set<Integer> nbr_set, Boolean step ) 
@@ -63,7 +62,6 @@ public class Node implements Runnable {
 		node_id = id;
 		node_set = nbr_set;
 		receiving_port = BASE_PORT + node_id;
-		step = _step;
 
 		// Add Neighbor information
 		for (Map.Entry<Integer, Integer> entry : list.get(node_id).get_dt().entrySet()) 
@@ -212,6 +210,56 @@ public class Node implements Runnable {
 		out_socket.close();
 	}
 
+	void send_and_receive() throws UnknownHostException, IOException, InterruptedException
+	{
+		node_dt_rec = new DTReceiver( receiving_port );
+		Thread receiver_thread = new Thread( node_dt_rec );
+		receiver_thread.start();
+
+		log_area.append("Listening for TCP traffic on port " + receiving_port + "\n");
+
+		while( true )
+		{
+			received_dt = node_dt_rec.get_queue().poll();
+
+			if ( received_dt != null )
+			{
+				//received_dt = node_dt_rec.get_queue().remove( 0 );
+				
+
+				log_area.append("Received from " + received_dt.get_id() + ": " 
+					+ dt_to_string( received_dt ) + ".\n");
+					
+				// Check if received DV row is different than current
+				if (check_change_flag()) 
+				{
+					// Update current neighbor DV row to received if different
+					update_nbr_dt();
+
+					// Set variable
+					log_area.append("Updated received DT to neighbor.\n");
+					refresh_table();
+
+					// Update the main DV row and report if any changes were made
+					if (main_dv_change()) 
+					{
+						refresh_table();
+						// Log for changes
+						log_area.append("Updated Primary DT using Bellman-Ford.\n");
+						broadcast_dt();
+					} 
+					else 
+					{
+						log_area.append("Primary DT up-to-date. No need to broadcast changes.\n");
+					}
+					send_dt_node( BASE_PORT );
+					log_area.append("Sent updated DT to master\n");
+				} 				
+			}
+			TimeUnit.MILLISECONDS.sleep( 500 );
+		}
+	}
+
 	// Receiving DV information and trigger broadcast changes
 	void receive_and_send() throws IOException, ClassNotFoundException, InterruptedException 
 	{
@@ -247,18 +295,10 @@ public class Node implements Runnable {
 					refresh_table();
 					// Log for changes
 					log_area.append("Updated Primary DT using Bellman-Ford.\n");
+					broadcast_dt();
 
-					// Broadcast changes after updating main DV table
-					for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
-					{
-						send_dt_node(BASE_PORT + entry.getKey() );
-						log_area.append("Sent updated DT to node " + entry.getKey() + ".\n");
-						// Sleep between each node sent
-						TimeUnit.MILLISECONDS.sleep(500);
-					}
 					send_dt_node( BASE_PORT );
-					log_area.append("Sent DT to master\n");
-
+					log_area.append("Sent updated DT to master\n");
 				} 
 				else 
 				{
@@ -289,8 +329,8 @@ public class Node implements Runnable {
 		log_area = new JTextArea("Logs for node " + node_id + "\n");
 
 		// JTable variables
-		Vector<Vector<String>> nbr_data_table = get_nbr_vector();
-		JTable nbr_table = new JTable( nbr_data_table, get_header_vector().get(1) );
+		nbr_data_table = get_nbr_vector();
+		nbr_table = new JTable( nbr_data_table, get_header_vector().get(1) );
 
 		// Alignment for all JTables
 		DefaultTableCellRenderer c_render = new DefaultTableCellRenderer();
@@ -338,83 +378,21 @@ public class Node implements Runnable {
 		frame.add(panel);
 		frame.setSize(500, 400);
 		frame.setVisible(true);
-
-
-		nbr_table.getModel().addTableModelListener( (TableModelListener) new TableModelListener() 
-		{
-			public void tableChanged( TableModelEvent e )
-			{
-				if ( ! nbr_data_table.get( 0 ).equals( get_nbr_vector().get( 0 ) ) )
-				{
-					int j = 1;
-					for ( Map.Entry<Integer, Integer> entry : nbr_val.entrySet() )
-					{
-						nbr_val.put( entry.getKey(), Integer.parseInt( nbr_data_table.get( 0 ).get( j ) ) );
-						j++;
-					}
-
-					log_area.append( "Neighbor link changed. Updating DV.\n" );
-					// Update the main DV row and report if any changes were made
-					if (main_dv_change()) 
-					{
-						refresh_table();
-						// Log for changes
-						log_area.append("Updated Primary DT using Bellman-Ford.\n");
-	
-						// Broadcast changes after updating main DV table
-						for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
-						{
-							try 
-							{
-								send_dt_node(BASE_PORT + entry.getKey() );
-								log_area.append("Sent updated DT to node " + entry.getKey() + ".\n");
-							} 
-							catch (UnknownHostException e1) 
-							{
-								// TODO Auto-generated catch block
-								e1.printStackTrace();
-							} 
-							catch (IOException e1) 
-							{
-								// TODO Auto-generated catch block
-								e1.printStackTrace();
-							}
-							// Sleep between each node sent
-						}
-						try 
-						{
-							send_dt_node( BASE_PORT );
-						} 
-						catch (UnknownHostException e1) 
-						{
-							// TODO Auto-generated catch block
-							e1.printStackTrace();
-						} 
-						catch (IOException e1) 
-						{
-							// TODO Auto-generated catch block
-							e1.printStackTrace();
-						}
-						log_area.append("Sent DT to master\n");
-					} 				
-				}
-			}
-		});
 	}
 
 	// Broadcast main distance vector node to all neighbor host
 	void broadcast_dt() 
 		throws UnknownHostException, IOException, InterruptedException 
 	{
-		TimeUnit.SECONDS.sleep(1);
 		for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
 		{
 			send_dt_node(BASE_PORT + entry.getKey() );
 			log_area.append("Sent updated DT to node " + entry.getKey() + ".\n");
-			//TimeUnit.MILLISECONDS.sleep(500);
+			TimeUnit.MILLISECONDS.sleep(500);
 		}
+		//send_dt_node( BASE_PORT );
+		//log_area.append("Sent updated DT to master\n");
 	}
-
 
 	// Update neighbor Distance Vector Table
 	void update_nbr_dt() 
@@ -503,18 +481,108 @@ public class Node implements Runnable {
 		return nbr_val_vector;
 	}
 
+	void listen_data_change()
+	{
+		nbr_table.getModel().addTableModelListener( (TableModelListener) new TableModelListener() 
+		{
+			public void tableChanged( TableModelEvent e )
+			{
+				if ( ! nbr_data_table.get( 0 ).equals( get_nbr_vector().get( 0 ) ) )
+				{
+					int j = 1;
+					for ( Map.Entry<Integer, Integer> entry : nbr_val.entrySet() )
+					{
+						nbr_val.put( entry.getKey(), Integer.parseInt( nbr_data_table.get( 0 ).get( j ) ) );
+						j++;
+					}
+
+					log_area.append( "Neighbor link changed. Updating DV.\n" );
+					// Update the main DV row and report if any changes were made
+					if (main_dv_change()) 
+					{
+						refresh_table();
+						// Log for changes
+						log_area.append("Updated Primary DT using Bellman-Ford.\n");
+	
+						// Broadcast changes after updating main DV table
+						for (Map.Entry<Integer, Integer> entry : nbr_val.entrySet()) 
+						{
+							try {
+								broadcast_dt();
+								send_dt_node( BASE_PORT );
+								log_area.append("Sent updated DT to master\n");
+							} catch (UnknownHostException e1) {
+								// TODO Auto-generated catch block
+								e1.printStackTrace();
+							} catch (IOException e1) {
+								// TODO Auto-generated catch block
+								e1.printStackTrace();
+							} catch (InterruptedException e1) {
+								// TODO Auto-generated catch block
+								e1.printStackTrace();
+							}
+						}
+					} 				
+				}
+			}
+		});
+	}
+
 	// Overriding Run method
 	@Override
 	public void run() 
 	{
 
 		setup_gui();
+		// Listening for any changes in the table and update values
+		listen_data_change();
+
+		Timer timer = new Timer();
+		timer.schedule( new TimerTask()
+		{
+			@Override
+			public void run() 
+			{
+				try 
+				{
+					broadcast_dt();
+				} catch (UnknownHostException e) 
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				} catch (IOException e) 
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				} catch (InterruptedException e) 
+				{
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+		}, 3000, 3000 );
+
+		
+
+		// try {
+		// 	send_and_receive();
+		// } catch (UnknownHostException e) {
+		// 	// TODO Auto-generated catch block
+		// 	e.printStackTrace();
+		// } catch (IOException e) {
+		// 	// TODO Auto-generated catch block
+		// 	e.printStackTrace();
+		// } catch (InterruptedException e) {
+		// 	// TODO Auto-generated catch block
+		// 	e.printStackTrace();
+		// }
 
 		try 
 		{
-			receive_and_send();
+			send_and_receive();
+			//receive_and_send();
 		} 
-		catch (ClassNotFoundException | IOException | InterruptedException e) 
+		catch (IOException | InterruptedException e) 
 		{
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -522,7 +590,6 @@ public class Node implements Runnable {
 		
 	}
 	
-
 	public static void main( String[] args )
 	{
 
