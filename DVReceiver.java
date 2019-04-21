@@ -6,6 +6,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class DVReceiver implements Runnable 
 {
@@ -50,6 +52,17 @@ public class DVReceiver implements Runnable
     @Override
     public void run() 
     {
+        // Set timer to clear management queue allows for line repair
+        Timer timer = new Timer();
+        timer.schedule( new TimerTask()
+        {
+            @Override
+            public void run()
+            {
+                mgt_queue.clear();
+            }
+        }, 5000, 5000 );
+
         try {
 			receive_data();
 		} catch (ClassNotFoundException e) {

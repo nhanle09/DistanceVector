@@ -32,6 +32,7 @@ public class DVMaster
 	static final int BASE_PORT = 5680;
 
 	// Variables
+	private static int cycle_count = 0;
 	private static int stable_count = 10;
 	private static boolean stable_state = false;
 	private static File input_file = null;
@@ -123,10 +124,12 @@ public class DVMaster
 		while( true )
 		{
 			// Check if the received data queue is empty before processing
+			// Mechanism for detecting stability
 			if( dvr_receiver.get_queue().size() != 0 )
 			{
 				update_main_dt();
-				stable_count = 6;
+				cycle_count++;
+				stable_count = 8;
 			}
 			else
 			{
@@ -141,6 +144,7 @@ public class DVMaster
 						log_area.append( "Stable state reached!\n" );
 						long dif = ( System.currentTimeMillis() - start_time ) / 1000;
 						log_area.append( "Total Time: " + dif + " seconds\n" );
+						log_area.append( "Number of cycle: " + cycle_count + "\n" );
 						stable_state = true;
 					}
 				}
@@ -258,10 +262,12 @@ public class DVMaster
 				if ( dvr_receiver.get_queue().peek() != null )
 				{
 					update_main_dt();
+					cycle_count++;
 				}
 				else
 				{
-					log_area.append( "Reached Stable state. No more clicking\n" );
+					log_area.append( "Stable state reached!\n" );
+					log_area.append( "Number of cycle: " + cycle_count + "\n" );
 				}
 			}
 		});
