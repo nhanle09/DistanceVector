@@ -212,7 +212,7 @@ public class DVNode implements Runnable
 		for ( Map.Entry<Integer, Integer> entry : edge_cost.entrySet() ) 
 		{
 			send_dvr_node( BASE_PORT + entry.getKey() );
-			log_area.append( "Sent updated DT to node " + entry.getKey() + ".\n" );
+			//log_area.append( "Sent updated DT to node " + entry.getKey() + ".\n" );
 			TimeUnit.MILLISECONDS.sleep( 500 );
 		}
 	}
@@ -246,7 +246,7 @@ public class DVNode implements Runnable
 				log_area.append( "Received from " + received_dvr.get_id() + ": " + dvr_string + ".\n" );
 					
 				// Changes current edge's DVRow to received DVRow if it's different
-				if ( !edge_dvr.get( received_dvr.get_id() ).get_dvr().equals( received_dvr.get_dvr() ) )
+				if ( ! edge_dvr.get( received_dvr.get_id() ).get_dvr().equals( received_dvr.get_dvr() ) )
 				{
 					edge_dvr.put( received_dvr.get_id(), received_dvr );
 					// Update the changes to Distance Table Vector that being used in the JTable
@@ -274,6 +274,7 @@ public class DVNode implements Runnable
 
 						// Broadcast the changes
 						broadcast_dvr();
+						log_area.append( "Sent updated DT to edge nodes\n" );
 					} 
 					else 
 					{
@@ -375,27 +376,54 @@ public class DVNode implements Runnable
 
 					log_area.append( "Neighbor link changed. Updating DV.\n" );
 					// Update the main DV row and report if any changes were made
-					if ( main_dvr_change() ) 
+
+					// Iterate through all keys in primary dv
+					Map<Integer, Integer> dvr_table = primary_dvr.get_dvr();
+					for ( Map.Entry<Integer, Integer> dvr_entry : dvr_table.entrySet() )
 					{
-						refresh_table();
-						// Log for changes
-						log_area.append( "Updated Primary DT using Bellman-Ford.\n" );
-	
-						try {
-							broadcast_dvr();
-							send_dvr_node( BASE_PORT );
-							log_area.append( "Sent updated DT to master\n" );
-						} catch ( UnknownHostException e1 ) {
-							log_area.append( "Node: Unknown Host Exception\n" );
-							e1.printStackTrace();
-						} catch ( IOException e1 ) {
-							log_area.append( "Node: IO Exception\n" );
-							e1.printStackTrace();
-						} catch ( InterruptedException e1 ) {
-							log_area.append( "Node: Interrupt Exception\n" );
-							e1.printStackTrace();
+						// Destination ID Dest
+						int dest_val = dvr_entry.getKey();
+						// Candidates to select minimum values from
+						ArrayList<Integer> dv_candidates = new ArrayList<Integer>();
+						// Update if destination node doesn't match primary node
+						if ( dvr_entry.getKey() != node_id ) 
+						{
+							// Iterate through each node in the neighbor to calculate C( x, v )
+							for ( Map.Entry<Integer, Integer> edge_entry : edge_cost.entrySet() ) 
+							{
+								int edge_num = edge_entry.getValue();
+								int edge_to_dest = edge_dvr.get( edge_entry.getKey() ).get_dvr().get( dest_val );
+								dv_candidates.add( edge_num + edge_to_dest );
+							}
+
+							// Set the min value from the calculation as new DV if it's less than current
+							int min_dvr = Collections.min( dv_candidates );
+							HashMap<Integer, Integer> temp_dvr = primary_dvr.get_dvr();
+
+							temp_dvr.put( dest_val, min_dvr );
+							primary_dvr.set_dvr( temp_dvr );
+							dt_vector.set( 0, convert_dvr_to_vector( primary_dvr ) );
 						}
-					} 				
+					}
+
+					refresh_table();
+					// Log for changes
+					log_area.append( "Updated Primary DT using Bellman-Ford.\n" );
+
+					try {
+						broadcast_dvr();
+						send_dvr_node( BASE_PORT );
+						log_area.append( "Sent updated DT to master\n" );
+					} catch ( UnknownHostException e1 ) {
+						log_area.append( "Node: Unknown Host Exception\n" );
+						e1.printStackTrace();
+					} catch ( IOException e1 ) {
+						log_area.append( "Node: IO Exception\n" );
+						e1.printStackTrace();
+					} catch ( InterruptedException e1 ) {
+						log_area.append( "Node: Interrupt Exception\n" );
+						e1.printStackTrace();
+					}		
 				}
 			}
 		} );
